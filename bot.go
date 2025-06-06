@@ -263,6 +263,21 @@ func RunBot(token string, admin int64) {
 				}
 			}
 
+			// --- Запрос помощи у администратора ---
+			if update.Message.Text == "🛠 Сообщить администратору" {
+				username := update.Message.From.UserName
+				if username == "" {
+					username = "без username"
+				}
+				alert := fmt.Sprintf("Пользователь %d (@%s) запросил помощь", chatID, username)
+				if SystemAdminID != adminID {
+					bot.Send(tgbotapi.NewMessage(SystemAdminID, alert))
+				}
+				bot.Send(tgbotapi.NewMessage(adminID, alert))
+				bot.Send(tgbotapi.NewMessage(chatID, "Администратор уведомлен. Ожидайте ответа."))
+				continue
+			}
+
 			// --- Проверка имени ---
 			if !IsKnownUser(chatID) && update.Message.Text != "" && pending[chatID] == "" {
 				if !isValidName(update.Message.Text) {
