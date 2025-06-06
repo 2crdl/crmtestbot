@@ -63,6 +63,18 @@ func setRole(chatID int64, role string) {
 	userRoles[chatID] = role
 }
 
+// notifyButtonPress informs admins that a user pressed a specific button.
+func notifyButtonPress(bot *tgbotapi.BotAPI, userID int64, username, button string) {
+	if username == "" {
+		username = "без username"
+	}
+	msgText := fmt.Sprintf("Пользователь %d (@%s) нажал кнопку \"%s\"", userID, username, button)
+	if SystemAdminID != adminID {
+		bot.Send(tgbotapi.NewMessage(SystemAdminID, msgText))
+	}
+	bot.Send(tgbotapi.NewMessage(adminID, msgText))
+}
+
 // --- ВАЛИДАЦИЯ ИМЕНИ ---
 func isValidName(name string) bool {
 	if forbiddenNames[name] {
@@ -105,6 +117,16 @@ func RunBot(token string, admin int64) {
 			role := getRole(chatID)
 			isAdmin := role == "admin" || role == "system_admin"
 			isSystemAdmin := role == "system_admin"
+
+			if forbiddenNames[update.Message.Text] {
+				uname := update.Message.From.UserName
+				notifyButtonPress(bot, chatID, uname, update.Message.Text)
+			}
+
+			if update.Message.Contact != nil {
+				uname := update.Message.From.UserName
+				notifyButtonPress(bot, chatID, uname, "📱 Отправить контакт")
+			}
 
 			// --- Проверка выбора роли после принятия заявки ---
 			if pendingRoleChoice[chatID] {
