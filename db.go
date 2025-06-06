@@ -8,19 +8,19 @@ import (
 
 const (
 	KnownUsersFile   = "known_users.txt"
-	PendingNamesFile = "pending_names.txt"
+	PendingUsersFile = "pending_users.txt"
 )
 
 // UserRecord - структура для хранения пользователя
 // Для known_users.txt: id:name:role:username:phone
-// Для pending_names.txt: id:name:username:phone
+// Для pending_users.txt: id:name:username:phone
 
 type UserRecord struct {
-	ID      int64
-	Name    string
-	Role    string // только для known_users
+	ID       int64
+	Name     string
+	Role     string // только для known_users
 	Username string
-	Phone   string
+	Phone    string
 }
 
 // --- KNOWN USERS ---
@@ -35,13 +35,9 @@ func IsKnownUser(chatID int64) bool {
 }
 
 func AddKnownUserFull(user UserRecord) error {
-	f, err := os.OpenFile(KnownUsersFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	_, err = f.WriteString(fmt.Sprintf("%d:%s:%s:%s:%s\n", user.ID, user.Name, user.Role, user.Username, user.Phone))
-	return err
+	users, _ := LoadKnownUsers()
+	users[user.ID] = user
+	return SaveAllKnownUsers(users)
 }
 
 func RemoveKnownUser(chatID int64) error {
@@ -76,11 +72,11 @@ func LoadKnownUsers() (map[int64]UserRecord, error) {
 		var id int64
 		fmt.Sscanf(parts[0], "%d", &id)
 		users[id] = UserRecord{
-			ID:      id,
-			Name:    parts[1],
-			Role:    parts[2],
+			ID:       id,
+			Name:     parts[1],
+			Role:     parts[2],
 			Username: parts[3],
-			Phone:   parts[4],
+			Phone:    parts[4],
 		}
 	}
 	return users, nil
@@ -91,11 +87,11 @@ func EnsureSystemAdminInKnownUsers() error {
 	users, _ := LoadKnownUsers()
 	if _, ok := users[SystemAdminID]; !ok {
 		sys := UserRecord{
-			ID:      SystemAdminID,
-			Name:    "Суперадмин",
-			Role:    "system_admin",
+			ID:       SystemAdminID,
+			Name:     "Суперадмин",
+			Role:     "system_admin",
 			Username: "superadmin",
-			Phone:   "",
+			Phone:    "",
 		}
 		return AddKnownUserFull(sys)
 	}
@@ -105,13 +101,9 @@ func EnsureSystemAdminInKnownUsers() error {
 // --- PENDING USERS ---
 
 func AddPendingUser(user UserRecord) error {
-	f, err := os.OpenFile(PendingNamesFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	_, err = f.WriteString(fmt.Sprintf("%d:%s:%s:%s\n", user.ID, user.Name, user.Username, user.Phone))
-	return err
+	users, _ := LoadPendingUsers()
+	users[user.ID] = user
+	return SaveAllPendingUsers(users)
 }
 
 func RemovePendingUser(chatID int64) error {
@@ -125,11 +117,11 @@ func SaveAllPendingUsers(users map[int64]UserRecord) error {
 	for _, u := range users {
 		lines = append(lines, fmt.Sprintf("%d:%s:%s:%s", u.ID, u.Name, u.Username, u.Phone))
 	}
-	return os.WriteFile(PendingNamesFile, []byte(strings.Join(lines, "\n")), 0644)
+	return os.WriteFile(PendingUsersFile, []byte(strings.Join(lines, "\n")), 0644)
 }
 
 func LoadPendingUsers() (map[int64]UserRecord, error) {
-	data, err := os.ReadFile(PendingNamesFile)
+	data, err := os.ReadFile(PendingUsersFile)
 	if err != nil {
 		return map[int64]UserRecord{}, nil
 	}
@@ -146,11 +138,11 @@ func LoadPendingUsers() (map[int64]UserRecord, error) {
 		var id int64
 		fmt.Sscanf(parts[0], "%d", &id)
 		users[id] = UserRecord{
-			ID:      id,
-			Name:    parts[1],
+			ID:       id,
+			Name:     parts[1],
 			Username: parts[2],
-			Phone:   parts[3],
+			Phone:    parts[3],
 		}
 	}
 	return users, nil
-} 
+}
