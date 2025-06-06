@@ -8,12 +8,12 @@ import (
 
 const (
 	KnownUsersFile   = "known_users.txt"
-	PendingNamesFile = "pending_names.txt"
+	PendingUsersFile = "pending_users.txt"
 )
 
 // UserRecord - структура для хранения пользователя
 // Для known_users.txt: id:name:role:username:phone
-// Для pending_names.txt: id:name:username:phone
+// Для pending_users.txt: id:name:username:phone
 
 type UserRecord struct {
 	ID       int64
@@ -117,11 +117,11 @@ func SaveAllPendingUsers(users map[int64]UserRecord) error {
 	for _, u := range users {
 		lines = append(lines, fmt.Sprintf("%d:%s:%s:%s", u.ID, u.Name, u.Username, u.Phone))
 	}
-	return os.WriteFile(PendingNamesFile, []byte(strings.Join(lines, "\n")), 0644)
+	return os.WriteFile(PendingUsersFile, []byte(strings.Join(lines, "\n")), 0644)
 }
 
 func LoadPendingUsers() (map[int64]UserRecord, error) {
-	data, err := os.ReadFile(PendingNamesFile)
+	data, err := os.ReadFile(PendingUsersFile)
 	if err != nil {
 		return map[int64]UserRecord{}, nil
 	}
