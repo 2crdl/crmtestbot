@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"regexp"
+	"strconv"
 	"strings"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -14,30 +15,32 @@ const (
 )
 
 var (
-	adminID int64
-	apiToken string
-	feedbackWaiting = make(map[int64]bool)
-	userRoles = make(map[int64]string) // chatID -> role
-	pendingRoleChoice = make(map[int64]bool)
+	adminID            int64
+	apiToken           string
+	feedbackWaiting    = make(map[int64]bool)
+	userRoles          = make(map[int64]string) // chatID -> role
+	pendingRoleChoice  = make(map[int64]bool)
 	pendingApproveUser = make(map[int64]int64) // admin chatID -> user chatID
+	startWorkPending   = make(map[int64]int64) // userID -> orderID awaiting start photo
+	finishWorkPending  = make(map[int64]int64) // userID -> orderID awaiting finish photo
 )
 
 var forbiddenNames = map[string]bool{
-	"📦 Мои заказы": true,
-	"💬 Связь с админом": true,
-	"👥 Пользователи": true,
-	"📱 Отправить контакт": true,
+	"📦 Мои заказы":              true,
+	"💬 Связь с админом":         true,
+	"👥 Пользователи":            true,
+	"📱 Отправить контакт":       true,
 	"🛠 Сообщить администратору": true,
-	"❌ Отмена действия": true,
-	"✅ Активные": true,
-	"⏳ Ожидающие": true,
-	"✅ Принять": true,
-	"❌ Отклонить": true,
-	"🗑 Удалить": true,
-	"Администратор": true,
-	"Обувщик": true,
-	"Реставратор": true,
-	"Химчистер": true,
+	"❌ Отмена действия":         true,
+	"✅ Активные":                true,
+	"⏳ Ожидающие":               true,
+	"✅ Принять":                 true,
+	"❌ Отклонить":               true,
+	"🗑 Удалить":                 true,
+	"Администратор":             true,
+	"Обувщик":                   true,
+	"Реставратор":               true,
+	"Химчистер":                 true,
 }
 
 func getRole(chatID int64) string {
@@ -115,11 +118,11 @@ func RunBot(token string, admin int64) {
 					}
 					// Добавляем в known_users.txt
 					newUser := UserRecord{
-						ID:      pendingUser.ID,
-						Name:    pendingUser.Name,
-						Role:    update.Message.Text,
+						ID:       pendingUser.ID,
+						Name:     pendingUser.Name,
+						Role:     update.Message.Text,
 						Username: pendingUser.Username,
-						Phone:   pendingUser.Phone,
+						Phone:    pendingUser.Phone,
 					}
 					AddKnownUserFull(newUser)
 					userRoles[uid] = update.Message.Text
@@ -150,32 +153,114 @@ func RunBot(token string, admin int64) {
 				continue
 			}
 
-			// --- Обработка команды /start ---
-			if update.Message.IsCommand() && update.Message.Command() == "start" {
-				if isAdmin {
-					msg := tgbotapi.NewMessage(chatID, "Вы в админ-панели.")
-					msg.ReplyMarkup = adminMenu(isSystemAdmin)
+			// --- Обработка команд ---
+			if update.Message.IsCommand() {
+				switch update.Message.Command() {
+				case "start":
+					if isAdmin {
+						msg := tgbotapi.NewMessage(chatID, "Вы в админ-панели.")
+						msg.ReplyMarkup = adminMenu(isSystemAdmin)
+						bot.Send(msg)
+						continue
+					}
+					if IsKnownUser(chatID) {
+						msg := tgbotapi.NewMessage(chatID, "Вы уже зарегистрированы.")
+						msg.ReplyMarkup = userMenu()
+						bot.Send(msg)
+						continue
+					}
+					regKb := tgbotapi.NewReplyKeyboard(
+						tgbotapi.NewKeyboardButtonRow(
+							tgbotapi.NewKeyboardButtonContact("📱 Отправить контакт"),
+						),
+						tgbotapi.NewKeyboardButtonRow(
+							tgbotapi.NewKeyboardButton("🛠 Сообщить администратору"),
+						),
+					)
+					msg := tgbotapi.NewMessage(chatID, "Пожалуйста, введите своё имя для регистрации:")
+					msg.ReplyMarkup = regKb
 					bot.Send(msg)
 					continue
-				}
-				if IsKnownUser(chatID) {
-					msg := tgbotapi.NewMessage(chatID, "Вы уже зарегистрированы.")
-					msg.ReplyMarkup = userMenu()
-					bot.Send(msg)
+				case "create_order":
+					if !isAdmin {
+						continue
+					}
+					args := update.Message.CommandArguments()
+					if args == "" {
+						bot.Send(tgbotapi.NewMessage(chatID, "Usage: /create_order <userID>"))
+						continue
+					}
+					uid, err := strconv.ParseInt(args, 10, 64)
+					if err != nil {
+						bot.Send(tgbotapi.NewMessage(chatID, "Invalid user ID"))
+						continue
+					}
+					orders, _ := LoadOrders()
+					oid := NextOrderID(orders)
+					order := Order{ID: oid, UserID: uid, Status: "active"}
+					if err := AddOrder(order); err != nil {
+						bot.Send(tgbotapi.NewMessage(chatID, "Failed to create order"))
+						continue
+					}
+					bot.Send(tgbotapi.NewMessage(chatID, fmt.Sprintf("Создан заказ %d для пользователя %d", oid, uid)))
+					continue
+				case "start_work":
+					args := update.Message.CommandArguments()
+					id, err := strconv.ParseInt(args, 10, 64)
+					if err != nil {
+						bot.Send(tgbotapi.NewMessage(chatID, "Неверный ID заказа"))
+						continue
+					}
+					orders, _ := GetOrdersByUser(chatID)
+					var found *Order
+					for i := range orders {
+						if orders[i].ID == id {
+							found = &orders[i]
+							break
+						}
+					}
+					if found == nil || found.Status != "active" {
+						bot.Send(tgbotapi.NewMessage(chatID, "Заказ не найден или завершен"))
+						continue
+					}
+					if found.StartPhoto != "" {
+						bot.Send(tgbotapi.NewMessage(chatID, "Работа уже начата"))
+						continue
+					}
+					startWorkPending[chatID] = id
+					bot.Send(tgbotapi.NewMessage(chatID, "Отправьте фотографию начала работ"))
+					continue
+				case "finish_work":
+					args := update.Message.CommandArguments()
+					id, err := strconv.ParseInt(args, 10, 64)
+					if err != nil {
+						bot.Send(tgbotapi.NewMessage(chatID, "Неверный ID заказа"))
+						continue
+					}
+					orders, _ := GetOrdersByUser(chatID)
+					var found *Order
+					for i := range orders {
+						if orders[i].ID == id {
+							found = &orders[i]
+							break
+						}
+					}
+					if found == nil || found.Status != "active" {
+						bot.Send(tgbotapi.NewMessage(chatID, "Заказ не найден или завершен"))
+						continue
+					}
+					if found.StartPhoto == "" {
+						bot.Send(tgbotapi.NewMessage(chatID, "Сначала начните работу"))
+						continue
+					}
+					if found.EndPhoto != "" {
+						bot.Send(tgbotapi.NewMessage(chatID, "Работа уже завершена"))
+						continue
+					}
+					finishWorkPending[chatID] = id
+					bot.Send(tgbotapi.NewMessage(chatID, "Отправьте фотографию завершения"))
 					continue
 				}
-				regKb := tgbotapi.NewReplyKeyboard(
-					tgbotapi.NewKeyboardButtonRow(
-						tgbotapi.NewKeyboardButtonContact("📱 Отправить контакт"),
-					),
-					tgbotapi.NewKeyboardButtonRow(
-						tgbotapi.NewKeyboardButton("🛠 Сообщить администратору"),
-					),
-				)
-				msg := tgbotapi.NewMessage(chatID, "Пожалуйста, введите своё имя для регистрации:")
-				msg.ReplyMarkup = regKb
-				bot.Send(msg)
-				continue
 			}
 
 			// --- Проверка имени ---
@@ -211,10 +296,10 @@ func RunBot(token string, admin int64) {
 					}
 					phone := update.Message.Contact.PhoneNumber
 					pendingUser := UserRecord{
-						ID:      chatID,
-						Name:    name,
+						ID:       chatID,
+						Name:     name,
 						Username: username,
-						Phone:   phone,
+						Phone:    phone,
 					}
 					AddPendingUser(pendingUser)
 					pendingUsers[chatID] = pendingUser
@@ -232,10 +317,54 @@ func RunBot(token string, admin int64) {
 				}
 			}
 
+			// --- Обработка фото для начала или окончания работ ---
+			if len(update.Message.Photo) > 0 {
+				if oid, ok := startWorkPending[chatID]; ok {
+					photo := update.Message.Photo[len(update.Message.Photo)-1].FileID
+					orders, _ := GetOrdersByUser(chatID)
+					for _, o := range orders {
+						if o.ID == oid {
+							o.StartPhoto = photo
+							UpdateOrder(o)
+							bot.Send(tgbotapi.NewMessage(chatID, "Начало работы подтверждено"))
+							break
+						}
+					}
+					delete(startWorkPending, chatID)
+					continue
+				}
+				if oid, ok := finishWorkPending[chatID]; ok {
+					photo := update.Message.Photo[len(update.Message.Photo)-1].FileID
+					orders, _ := GetOrdersByUser(chatID)
+					for _, o := range orders {
+						if o.ID == oid {
+							o.EndPhoto = photo
+							o.Status = "completed"
+							UpdateOrder(o)
+							bot.Send(tgbotapi.NewMessage(chatID, "Работа завершена"))
+							break
+						}
+					}
+					delete(finishWorkPending, chatID)
+					continue
+				}
+			}
+
 			// --- Меню пользователя ---
 			if role == "user" || role == "Обувщик" || role == "Реставратор" || role == "Химчистер" {
 				if update.Message.Text == "📦 Мои заказы" {
-					msg := tgbotapi.NewMessage(chatID, "Ваши заказы (заглушка)")
+					orders, _ := GetOrdersByUser(chatID)
+					if len(orders) == 0 {
+						msg := tgbotapi.NewMessage(chatID, "У вас нет заказов")
+						msg.ReplyMarkup = userMenu()
+						bot.Send(msg)
+						continue
+					}
+					var list []string
+					for _, o := range orders {
+						list = append(list, fmt.Sprintf("#%d - %s", o.ID, o.Status))
+					}
+					msg := tgbotapi.NewMessage(chatID, strings.Join(list, "\n"))
 					msg.ReplyMarkup = userMenu()
 					bot.Send(msg)
 					continue
@@ -440,4 +569,4 @@ func roleChoiceMenu(isSystemAdmin bool) tgbotapi.ReplyKeyboardMarkup {
 		row = append(row, tgbotapi.NewKeyboardButton("Администратор"))
 	}
 	return tgbotapi.NewReplyKeyboard(row)
-} 
+}
