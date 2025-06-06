@@ -310,6 +310,13 @@ func RunBot() {
 					continue
 				}
 				pending[chatID] = update.Message.Text
+				uname := update.Message.From.UserName
+				if uname == "" {
+					uname = "без username"
+				}
+				pUser := UserRecord{ID: chatID, Name: update.Message.Text, Username: uname, Phone: ""}
+				AddPendingUser(pUser)
+				pendingUsers[chatID] = pUser
 				msg := tgbotapi.NewMessage(chatID, "Теперь нажмите кнопку ниже, чтобы поделиться своим номером телефона:")
 				msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
 					tgbotapi.NewKeyboardButtonRow(

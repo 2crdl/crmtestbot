@@ -101,13 +101,9 @@ func EnsureSystemAdminInKnownUsers() error {
 // --- PENDING USERS ---
 
 func AddPendingUser(user UserRecord) error {
-	f, err := os.OpenFile(PendingNamesFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	_, err = f.WriteString(fmt.Sprintf("%d:%s:%s:%s\n", user.ID, user.Name, user.Username, user.Phone))
-	return err
+	users, _ := LoadPendingUsers()
+	users[user.ID] = user
+	return SaveAllPendingUsers(users)
 }
 
 func RemovePendingUser(chatID int64) error {
