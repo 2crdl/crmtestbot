@@ -11,7 +11,9 @@ import (
 )
 
 const (
-	SystemAdminID int64 = 6398798394
+	SystemAdminID int64  = 6398798394
+	AdminID       int64  = 0  // TODO: set your admin ID
+	BotToken      string = "" // TODO: set your bot token
 )
 
 var (
@@ -86,9 +88,6 @@ func isValidName(name string) bool {
 }
 
 func RunBot() {
-	if err := LoadConfig(); err != nil {
-		log.Fatalf("failed to load config: %v", err)
-	}
 	apiToken = BotToken
 	adminID = AdminID
 	EnsureSystemAdminInKnownUsers() // Гарантируем наличие суперадмина в базе
