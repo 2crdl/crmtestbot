@@ -85,9 +85,12 @@ func isValidName(name string) bool {
 	return matched
 }
 
-func RunBot(token string, admin int64) {
-	apiToken = token
-	adminID = admin
+func RunBot() {
+	if err := LoadConfig(); err != nil {
+		log.Fatalf("failed to load config: %v", err)
+	}
+	apiToken = BotToken
+	adminID = AdminID
 	EnsureSystemAdminInKnownUsers() // Гарантируем наличие суперадмина в базе
 	setRole(SystemAdminID, "system_admin")
 	setRole(adminID, "admin")
